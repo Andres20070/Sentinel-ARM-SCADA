@@ -1,0 +1,161 @@
+﻿@page "/history"
+@using Sentinel.Scada.Web.Models
+@using Sentinel.Scada.Web.Services
+@inject HistorianService Historian
+
+<div class="scada-container">
+    <h1 class="scada-header">💾 Historial Local (Auditoria)</h1>
+
+    <button class="btn-refresh" @onclick="LoadData">🔄 Refrescar Datos</button>
+
+    <div class="table-container">
+        <table class="industrial-table">
+            <thead>
+                <tr>
+                    <th>Pose / Evento</th>
+                    <th>Corriente Pinza (mA)</th>
+                    <th>Distancia Láser (mm)</th>
+                    <th>RGB Objeto</th>
+                    <th>Ejes (PWM)</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_historicalData == null)
+                {
+                    <tr><td colspan="5">Cargando base de datos...</td></tr>
+                }
+                else if (!_historicalData.Any())
+                {
+                    <tr><td colspan="5">No hay telemetría guardada aún. Mueve el brazo biónico.</td></tr>
+                }
+                else
+                {
+                    @foreach (var row in _historicalData)
+                    {
+                        <tr>
+                            <td class="highlight">@row.Pose</td>
+                            <td class="@(row.Sensores.GripperCurrent_mA > 1000 ? "danger" : "safe")">
+                                @row.Sensores.GripperCurrent_mA.ToString("0.0")
+                            </td>
+                            <td>@row.Sensores.ZoneDistance_mm</td>
+                            <td>
+                                <span class="color-badge" style="background-color: rgb(@row.Sensores.RgbColor[0], @row.Sensores.RgbColor[1], @row.Sensores.RgbColor[2])">
+                                    @row.Sensores.RgbColor[0], @row.Sensores.RgbColor[1], @row.Sensores.RgbColor[2]
+                                </span>
+                            </td>
+                            <td class="small-text">
+                                [@string.Join(", ", row.Angulos)]
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+    /* Estilos SCADA Industriales */
+    body {
+        background-color: #0f172a;
+        color: #e2e8f0;
+        font-family: monospace;
+    }
+
+    .scada-container {
+        padding: 20px;
+    }
+
+    .scada-header {
+        border-bottom: 2px solid #38bdf8;
+        padding-bottom: 10px;
+        color: #38bdf8;
+    }
+
+    .btn-refresh {
+        background-color: #0ea5e9;
+        color: white;
+        padding: 10px 15px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 15px;
+        font-weight: bold;
+    }
+
+        .btn-refresh:hover {
+            background-color: #0284c7;
+        }
+
+    .table-container {
+        background: #1e293b;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        overflow-x: auto;
+    }
+
+    .industrial-table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+    }
+
+        .industrial-table th {
+            background-color: #0f172a;
+            padding: 12px;
+            border-bottom: 2px solid #334155;
+            color: #94a3b8;
+        }
+
+        .industrial-table td {
+            padding: 12px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .industrial-table tr:hover {
+            background-color: #334155;
+        }
+
+    .highlight {
+        color: #10b981;
+        font-weight: bold;
+    }
+
+    .danger {
+        color: #ef4444;
+        font-weight: bold;
+    }
+
+    .safe {
+        color: #10b981;
+    }
+
+    .small-text {
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .color-badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        color: white;
+        text-shadow: 1px 1px 1px black;
+        border: 1px solid white;
+    }
+</style>
+
+@code {
+    private List<BionicTelemetry>? _historicalData;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        // Llamamos a SQLite de forma asíncrona para no congelar la pantalla
+        _historicalData = await Historian.GetRecentHistoryAsync(20);
+    }
+}

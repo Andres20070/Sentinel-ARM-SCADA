@@ -1,0 +1,381 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using Sentinel.Scada.Web.Models
+@using Sentinel.Scada.Web.Services
+@implements IDisposable
+@inject ScadaMqttService MqttService
+
+<div class="scada-container">
+    <h1 class="scada-header">SCADA - CONTROL Y MONITOREO</h1>
+
+    <div class="top-bar">
+        <h3>Estado: <span class="highlight">@_telemetry.Pose</span></h3>
+        <div class="ip-config">
+            <label>IP del Brazo (ESP32): </label>
+            <input type="text" @bind="_esp32Ip" class="input-dark" placeholder="Ej: 192.168.1.50" />
+        </div>
+    </div>
+
+    <div class="dashboard-grid">
+        <div class="panel">
+            <h2>🦾 Cinemática y Vida Útil</h2>
+            <div class="axis-list">
+                @for (int i = 0; i < 6; i++)
+                {
+                    int index = i;
+                    double porcentajeDesgaste = (_odometroPWM[index] / _limiteVidaPWM[index]) * 100.0;
+                    if (porcentajeDesgaste > 100) porcentajeDesgaste = 100;
+
+                    <div class="axis-item">
+                        <div class="label-line">
+                            <strong>@_nombresEjes[index] <span class="badge-motor">@_tiposMotor[index]</span></strong>
+                            <span class="value-badge">@_telemetry.Angulos[index] PWM</span>
+                        </div>
+
+                        <input type="range" class="motor-slider"
+                               min="500" max="2500"
+                               value="@_telemetry.Angulos[index]"
+                               @onchange="@(e => MoverServo(index, e))" />
+
+                        <div class="wear-container">
+                            <span class="wear-label">Desgaste: @porcentajeDesgaste.ToString("0.0")%</span>
+                            <progress value="@porcentajeDesgaste" max="100" class="wear-bar @(porcentajeDesgaste > 80 ? "critical-wear" : "")"></progress>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="automation-controls">
+                <input type="text" @bind="_nombrePose" placeholder="Nombre (Ej: Agarre)" class="input-dark" />
+                <button class="btn-action" @onclick="MemorizarPose">Memorizar</button>
+                <button class="btn-action btn-run" @onclick="EjecutarSecuencia">▶ Ejecutar</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h2>🏭 Sensores de Calidad (QC)</h2>
+
+            <div class="sensor-card">
+                <h4>⚡ Fuerza de Pinza (INA219)</h4>
+                <h2 class="@(_telemetry.Sensores.GripperCurrent_mA > 1000 ? "danger" : "safe")">
+                    @_telemetry.Sensores.GripperCurrent_mA.ToString("0.0") mA
+                </h2>
+                <progress value="@_telemetry.Sensores.GripperCurrent_mA" max="3200" class="motor-bar"></progress>
+            </div>
+
+            <div class="sensor-card">
+                <h4>📏 Zona de Descarga (Láser)</h4>
+                <h2>@_telemetry.Sensores.ZoneDistance_mm mm</h2>
+                <p>@( _telemetry.Sensores.ZoneDistance_mm < 200 ? "🟢 Objeto en zona" : "🔴 Zona libre" )</p>
+            </div>
+
+            <div class="sensor-card">
+                <h4>🎨 Escáner de Color RGB</h4>
+                <div class="color-box" style="background-color: rgb(@_telemetry.Sensores.RgbColor[0], @_telemetry.Sensores.RgbColor[1], @_telemetry.Sensores.RgbColor[2])">
+                    RGB(@_telemetry.Sensores.RgbColor[0], @_telemetry.Sensores.RgbColor[1], @_telemetry.Sensores.RgbColor[2])
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    body {
+        background-color: #0f172a;
+        color: #e2e8f0;
+        font-family: monospace;
+    }
+
+    .scada-container {
+        padding: 20px;
+    }
+
+    .scada-header {
+        border-bottom: 2px solid #38bdf8;
+        padding-bottom: 10px;
+        color: #38bdf8;
+    }
+
+    .top-bar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+    }
+
+    .highlight {
+        color: #10b981;
+    }
+
+    .input-dark {
+        background: #334155;
+        color: white;
+        border: 1px solid #38bdf8;
+        padding: 8px;
+        border-radius: 4px;
+    }
+
+    .dashboard-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+
+    .panel {
+        background: #1e293b;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+    }
+
+    .axis-item {
+        margin-bottom: 15px;
+        background: #0f172a;
+        padding: 10px;
+        border-radius: 6px;
+    }
+
+    .label-line {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 5px;
+        align-items: center;
+    }
+
+    .badge-motor {
+        background: #475569;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        margin-left: 10px;
+    }
+
+    .value-badge {
+        color: #f59e0b;
+        font-weight: bold;
+    }
+
+    .motor-slider {
+        width: 100%;
+        cursor: pointer;
+        accent-color: #38bdf8;
+        margin-bottom: 5px;
+    }
+
+    .wear-container {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 0.8rem;
+        color: #94a3b8;
+    }
+
+    .wear-label {
+        width: 100px;
+    }
+
+    .wear-bar {
+        flex-grow: 1;
+        height: 8px;
+        accent-color: #10b981;
+    }
+
+    .critical-wear {
+        accent-color: #ef4444 !important;
+    }
+    /* Se pone rojo cuando pasa del 80% */
+    .motor-bar {
+        width: 100%;
+        height: 10px;
+        accent-color: #ef4444;
+    }
+
+    .automation-controls {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #334155;
+        display: flex;
+        gap: 10px;
+    }
+
+    .btn-action {
+        background: #334155;
+        color: white;
+        border: 1px solid #38bdf8;
+        padding: 8px 15px;
+        border-radius: 4px;
+        cursor: pointer;
+    }
+
+        .btn-action:hover {
+            background: #38bdf8;
+            color: black;
+        }
+
+    .btn-run {
+        background: #10b981;
+        border-color: #10b981;
+        color: black;
+        font-weight: bold;
+    }
+
+        .btn-run:hover {
+            background: #059669;
+            color: white;
+        }
+
+    .sensor-card {
+        background: #0f172a;
+        padding: 15px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+        border-left: 4px solid #f59e0b;
+    }
+
+    .danger {
+        color: #ef4444;
+    }
+
+    .safe {
+        color: #10b981;
+    }
+
+    .color-box {
+        padding: 10px;
+        text-align: center;
+        font-weight: bold;
+        color: white;
+        text-shadow: 1px 1px 2px black;
+        border-radius: 4px;
+    }
+</style>
+
+@code {
+    private BionicTelemetry _telemetry = new BionicTelemetry();
+
+    private readonly string[] _nombresEjes = { "Base", "Hombro", "Codo", "Muñeca V.", "Muñeca G.", "Pinza" };
+    private readonly string[] _tiposMotor = { "MG996R", "MG996R", "MG996R", "MG90S", "MG90S", "MG90S" };
+
+    // --- VARIABLES DEL GEMELO DIGITAL (Mantenimiento Predictivo) ---
+    private int[] _angulosAnteriores = new int[6] { 1500, 1500, 1500, 1500, 1500, 1500 };
+    private double[] _odometroPWM = new double[6] { 0, 0, 0, 0, 0, 0 };
+
+    // Límites teóricos de vida útil (PWM totales recorridos) para demo
+    // Simulamos que a los 50,000 pasos el MG90S pide mantenimiento, y el MG996R a los 100,000.
+    private readonly double[] _limiteVidaPWM = { 100000, 100000, 100000, 50000, 50000, 50000 };
+
+    private string _esp32Ip = "10.88.62.199";
+    private string _nombrePose = "";
+    private static readonly HttpClient _httpClient = new HttpClient();
+
+    protected override void OnInitialized()
+    {
+  
+        try
+        {
+            if (System.IO.File.Exists("wear_state.json"))
+            {
+                string json = System.IO.File.ReadAllText("wear_state.json");
+                _odometroPWM = System.Text.Json.JsonSerializer.Deserialize<double[]>(json) ?? new double[6];
+            }
+        }
+        catch { /* Si falla o no existe, arranca en cero */ }
+
+        MqttService.OnTelemetryReceived += UpdateDashboard;
+    }
+
+    private void UpdateDashboard(BionicTelemetry newData)
+    {
+        // Chivato para confirmar que el evento sí saltó del MQTT a la pantalla
+        Console.WriteLine("[BLAZOR UI] Recibiendo datos para actualizar pantalla...");
+
+        bool seMovio = false;
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (newData.Angulos[i] > 0)
+            {
+                int delta = Math.Abs(newData.Angulos[i] - _angulosAnteriores[i]);
+                if (delta > 0)
+                {
+                    _odometroPWM[i] += delta;
+                    seMovio = true;
+                }
+                _angulosAnteriores[i] = newData.Angulos[i];
+            }
+        }
+
+        if (seMovio)
+        {
+            try
+            {
+                string json = System.Text.Json.JsonSerializer.Serialize(_odometroPWM);
+                System.IO.File.WriteAllText("wear_state.json", json);
+            }
+            catch { }
+        }
+
+        // Asignamos la nueva telemetría
+        _telemetry = newData;
+
+        // REGLA DE ORO: En Blazor Server, obligamos al hilo principal a repintar el HTML
+        InvokeAsync(() =>
+        {
+            StateHasChanged();
+            Console.WriteLine("[BLAZOR UI] Pantalla redibujada con éxito.");
+        });
+    }
+
+    private async Task MoverServo(int idEje, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out int valorPwm))
+        {
+            try
+            {
+                // Construimos la URL con la IP que escribiste en la caja de texto
+                string url = $"http://{_esp32Ip}/set?id={idEje}&val={valorPwm}";
+                Console.WriteLine($"[Comando Blazor] Disparando orden a: {url}");
+
+                var response = await _httpClient.GetAsync(url);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    Console.WriteLine($"[Error HTTP] El ESP32 rechazó la orden. Código: {response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Error de Red Blazor] Imposible alcanzar al ESP32. ¿La IP '{_esp32Ip}' es correcta? Error: {ex.Message}");
+            }
+        }
+    }
+
+    private async Task MemorizarPose()
+    {
+        try
+        {
+            string nombre = string.IsNullOrWhiteSpace(_nombrePose) ? $"Paso_{DateTime.Now:HHmmss}" : _nombrePose;
+            await _httpClient.GetAsync($"http://{_esp32Ip}/savePose?name={nombre}");
+            _nombrePose = "";
+        }
+        catch { }
+    }
+
+    private async Task EjecutarSecuencia()
+    {
+        try { await _httpClient.GetAsync($"http://{_esp32Ip}/runAuto"); } catch { }
+    }
+
+    public void Dispose()
+    {
+        MqttService.OnTelemetryReceived -= UpdateDashboard;
+    }
+}
+<button @onclick="() => Console.WriteLine(++contadorPrueba)" class="btn-action">
+    BOTÓN DE PRUEBA: @contadorPrueba
+</button>
+
+@code {
+    private int contadorPrueba = 0;
+    // ... aquí sigue el resto de tu código @code ...
+}
